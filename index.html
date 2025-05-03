@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Solar System</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background-color: #000;
+        }
+        canvas { 
+            display: block; 
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: Arial, sans-serif;
+            background-color: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-family: Arial, sans-serif;
+            font-size: 24px;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">Солнечная система<br>Используйте мышь для вращения<br>Колесико для масштабирования</div>
+    <div id="loading">Загрузка текстур...</div>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
+    <script>
+        // Сцена
+        const scene = new THREE.Scene();
+        
+        // Камера
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 50, 100);
+        
+        // Рендерер
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+        
+        // Управление камерой
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        
+        // Освещение
+        const ambientLight = new THREE.AmbientLight(0x333333);
+        scene.add(ambientLight);
+        
+        const sunLight = new THREE.PointLight(0xffffff, 2, 200);
+        sunLight.castShadow = true;
+        scene.add(sunLight);
+
+        // Текстуры по умолчанию (цвета)
+        const defaultColors = {
+            sun: 0xfdb813,
+            mercury: 0xb5b5b5,
+            venus: 0xe6cdab,
+            earth: 0x6b93d6,
+            mars: 0xe27b58,
+            jupiter: 0xe3dccb,
+            saturn: 0xf5e3bf,
+            uranus: 0xd1e7e7,
+            neptune: 0x5b5ddf,
+            saturnRing: 0xd8c7a5
+        };
+
+        // Создаем Солнце
+        const createSun = () => {
+            const sunGeometry = new THREE.SphereGeometry(5, 32, 32);
+            const sunMaterial = new THREE.MeshBasicMaterial({
+                color: defaultColors.sun,
+                emissive: 0xffff00,
+                emissiveIntensity: 1
+            });
+            
+            const sun = new THREE.Mesh(sunGeometry, sunMaterial);
+            scene.add(sun);
+            sunLight.position.copy(sun.position);
+            
+            // Свечение Солнца
+            const sunGlowGeometry = new THREE.SphereGeometry(6, 32, 32);
+            const sunGlowMaterial = new THREE.MeshBasicMaterial({
+                color: 0xffaa00,
+                transparent: true,
+                opacity: 0.5,
+                blending: THREE.AdditiveBlending
+            });
+            const sunGlow = new THREE.Mesh(sunGlowGeometry, sunGlowMaterial);
+            sun.add(sunGlow);
+            
+            return sun;
+        };
+
+        // Параметры планет
+        const planetsData = [
+            { name: 'mercury', radius: 1.5, distance: 15, speed: 0.04, color: defaultColors.mercury },
+            { name: 'venus', radius: 2.2, distance: 25, speed: 0.015, color: defaultColors.venus },
+            { name: 'earth', radius: 2.5, distance: 35, speed: 0.01, 
+              texture: 'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_atmos_2048.jpg' },
+            { name: 'mars', radius: 1.8, distance: 45, speed: 0.008, color: defaultColors.mars },
+            { name: 'jupiter', radius: 4.5, distance: 60, speed: 0.002, color: defaultColors.jupiter },
+            { name: 'saturn', radius: 4, distance: 75, speed: 0.0009, color: defaultColors.saturn },
+            { name: 'uranus', radius: 3, distance: 90, speed: 0.0004, color: defaultColors.uranus },
+            { name: 'neptune', radius: 2.8, distance: 105, speed: 0.0001, color: defaultColors.neptune }
+        ];
+
+        const textureLoader = new THREE.TextureLoader();
+        const planets = [];
+        const orbits = [];
+
+        // Функция создания планеты с обработкой ошибок загрузки текстур
+        const createPlanet = (planetData) => {
+            return new Promise((resolve) => {
+                const planetGeometry = new THREE.SphereGeometry(planetData.radius, 32, 32);
+                
+                // Если есть URL текстуры, пробуем загрузить
+                if (planetData.texture) {
+                    textureLoader.load(
+                        planetData.texture,
+                        (texture) => {
+                            const planetMaterial = new THREE.MeshStandardMaterial({
+                                map: texture,
+                                roughness: 1,
+                                metalness: 0
+                            });
+                            resolve(new THREE.Mesh(planetGeometry, planetMaterial));
+                        },
+                        undefined,
+                        (error) => {
+                            console.error(`Ошибка загрузки текстуры для ${planetData.name}:`, error);
+                            const planetMaterial = new THREE.MeshStandardMaterial({
+                                color: planetData.color || 0xffffff,
+                                roughness: 1,
+                                metalness: 0
+                            });
+                            resolve(new THREE.Mesh(planetGeometry, planetMaterial));
+                        }
+                    );
+                } else {
+                    // Используем цвет по умолчанию
+                    const planetMaterial = new THREE.MeshStandardMaterial({
+                        color: planetData.color || 0xffffff,
+                        roughness: 1,
+                        metalness: 0
+                    });
+                    resolve(new THREE.Mesh(planetGeometry, planetMaterial));
+                }
+            });
+        };
+
+        // Создаем Солнечную систему
+        const initSolarSystem = async () => {
+            const sun = createSun();
+            
+            // Создаем орбиты
+            planetsData.forEach(planetData => {
+                const orbitGeometry = new THREE.BufferGeometry();
+                const orbitPoints = [];
+                const orbitRadius = planetData.distance;
+                
+                for (let i = 0; i <= 64; i++) {
+                    const theta = (i / 64) * Math.PI * 2;
+                    orbitPoints.push(new THREE.Vector3(
+                        orbitRadius * Math.cos(theta),
+                        0,
+                        orbitRadius * Math.sin(theta)
+                    ));
+                }
+                
+                orbitGeometry.setFromPoints(orbitPoints);
+                const orbitMaterial = new THREE.LineBasicMaterial({ color: 0x555555 });
+                const orbit = new THREE.Line(orbitGeometry, orbitMaterial);
+                scene.add(orbit);
+                orbits.push(orbit);
+            });
+            
+            // Создаем планеты
+            for (const planetData of planetsData) {
+                const planet = await createPlanet(planetData);
+                planet.position.x = planetData.distance;
+                planet.castShadow = true;
+                planet.receiveShadow = true;
+                scene.add(planet);
+                
+                planets.push({
+                    mesh: planet,
+                    angle: Math.random() * Math.PI * 2,
+                    speed: planetData.speed,
+                    distance: planetData.distance,
+                    name: planetData.name
+                });
+                
+                // Кольца Сатурна
+                if (planetData.name === 'saturn') {
+                    const ringGeometry = new THREE.RingGeometry(5, 7, 32);
+                    const ringMaterial = new THREE.MeshStandardMaterial({
+                        color: defaultColors.saturnRing,
+                        side: THREE.DoubleSide,
+                        transparent: true,
+                        opacity: 0.8
+                    });
+                    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+                    ring.rotation.x = Math.PI / 2;
+                    planet.add(ring);
+                }
+            }
+            
+            // Скрываем сообщение о загрузке
+            document.getElementById('loading').style.display = 'none';
+            
+            // Запускаем анимацию
+            animate();
+        };
+
+        // Анимация
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Вращение Солнца
+            const sun = scene.getObjectByName('sun');
+            if (sun) sun.rotation.y += 0.005;
+            
+            // Движение планет по орбитам
+            planets.forEach(planet => {
+                planet.angle += planet.speed;
+                planet.mesh.position.x = Math.cos(planet.angle) * planet.distance;
+                planet.mesh.position.z = Math.sin(planet.angle) * planet.distance;
+                planet.mesh.rotation.y += 0.01;
+            });
+            
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        
+        // Обработка изменения размера окна
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        // Инициализация
+        initSolarSystem();
+    </script>
+</body>
+</html>
